@@ -77,7 +77,7 @@ __out_shape__:
 A list or tupple. if shorter than input.shape then only the first/last (depending np/torch) dims are resized. if not specified, can be calcualated from scale_factor.
 
 __interp_method__:   
-The type of interpolation used to calculate the weights. this is a scalar to scalar function that needs to be applicable to tensors. see examples in interp_methods.py.
+The type of interpolation used to calculate the weights. this is a scalar to scalar function that needs to be applicable to tensors. The classical methods are implemented and can be found in interp_methods.py. (cubic, linear, laczos2, lanczos3, box).
 
 __support_sz__:   
 This is the support of the interpolation method, i.e length of non-zero segment. this is a characteristic of the function. eg. for bicubic 4, linear 2, laczos2 4, lanczos3 6, box 1.
