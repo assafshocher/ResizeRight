@@ -21,7 +21,7 @@ This is one of the main reasons for creating this as this consistency is often c
 
 7. On the other hand, you can use a **dynamic resize** function to scale to different scal-factors at each pass. Both ways built upon the same building-blocks and produce identical results. Both are differntiable and can be used inside a neural network.
 
-8. Differently from some existing methods, including MATLAB, You can **resize N-D tensors in M-D dimensions.** for any M<N.
+8. Differently from some existing methods, including MATLAB, You can **resize N-D tensors in M-D dimensions.** for any M<=N.
 
 9. You can specify a list of scale-factors to resize each dimension using a different scale-factor.
 
