@@ -3,7 +3,7 @@ This is a resizing packge for images or tensors, that supports both Numpy and Py
 
 In the Pytorch case, it is **fully differentiable and can be used inside a neural network** both as a dynamic function (eg. inside some "forward" method) or as a PyTorch layer (nn.Module).
  
-The code is very much inspired by MATLAB's imresize function, but with a many crucial modifications. It is specifically useful due to the following reasons:
+The code is very much inspired by MATLAB's imresize function, but with crucial modifications. It is specifically useful due to the following reasons:
 
 1. ResizeRight produces results **identical (PSNR>60) to MATLAB for the simple cases** (scale_factor * in_size is integer). None of the Python packages I am aware of, currently resizes images with results similar to MATLAB's imresize (which is a common benchmark for image resotration tasks, especially super-resolution). 
 
