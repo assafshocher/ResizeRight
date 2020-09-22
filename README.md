@@ -1,64 +1,85 @@
 # ResizeRight
-The correct way to resize images or tensors. For Numpy or Pytorch (differentiable).
---------
+This is a resizing packge for images or tensors, that supports both Numpy and PyTorch seamlessly. As far as I know, it is the only one that performs correctly in all cases. It is made to address some crucial issues that are not solved by other resizing packages. ResizeRight is used for image enhancement and restoration challenges.
 
-This image-resize funuction is used for image enhancement and restoration challenges, especially super-resolution.   
-It is made to address some crucial issues that are not solved by other resizing packages.   
-The code is mostly based on MATLAB's imresize function, but with a few crucial extra features. It is specifically useful due to the following reasons:
+In the Pytorch case, it is fully differentiable and can be used inside a neural network both as a dynamic function (eg. inside some "forward" method) or as a PyTorch layer.
+ 
+The code is very much inspired by MATLAB's imresize function, but with a many crucial modifications. It is specifically useful due to the following reasons:
 
-1. None of the Python packages I am aware of, currently resizes images with results similar to MATLAB's imresize (which is a common benchmark for image resotration tasks, especially super-resolution).
+1. ResizeRight produces results identical (PSNR>60) to MATLAB for the simple cases (scale_factor * in_size is integer). None of the Python packages I am aware of, currently resizes images with results similar to MATLAB's imresize (which is a common benchmark for image resotration tasks, especially super-resolution). 
 
-2. You can be accurate and consistent by specifying **both scale-factor and output-size**. This is an important feature for super-resolution and learning because one must acknowledge that the same outpu-size can be resulted with varying scale-factors. best explained by example: say you have an image of size 9x9 and you resize by scale-factor of 0.5. Result size is 5x5. now you resize with scale-factor of 2. you get result sized 10x10. "no big deal" ,you must thinking now, "I can resize it to output-size 9x9", right? but then you will not get the correct scale-fcator which is calculated as output-size / input-size = 1.8.  
+2. No other **differntiable** method I am aware of supports **AntiAliasing** as in MATLAB
+
+3. The most important part: In the general case where scale_factor * in_size is non-integer, no existing resizing method I am aware of (including MATLAB) performs consistently. ResizeRight is accurate and consistent due to its ability to handle when user specifies **both scale-factor and output-size**. This is a super important feature for super-resolution and learning because one must acknowledge that the same output-size can be resulted with varying scale-factors. Best explained by example: say you have an image of size 9x9 and you resize by scale-factor of 0.5. Result size is 5x5. now you resize with scale-factor of 2. you get result sized 10x10. "no big deal", you must be thinking now, "I can resize it to output-size 9x9", right? but then you will not get the correct scale-fcator which is calculated as output-size / input-size = 1.8.
+ResizeRight is the only one that consistently maintains the image centered, as in optical zoom while complying to the exact scale-factor and output size the user requires. 
 This is one of the main reasons for creating this as this consistency is often crucial for learning based tasks.
 
-3. In addition to the common resizing methods (linear, cubic, lanczos etc.), you can specify a numeric array as a resizing kernel and use it to resize the image.
+4. Misalignment in resizing is a pandemic! Many existing packages actually return misaligned results. it is visually not apparent but can cause great damage to image enhancement tasks.(for example: https://hackernoon.com/how-tensorflows-tf-image-resize-stole-60-days-of-my-life-aba5eb093f35). Other artifacts can also be witnessed (eg. https://twitter.com/jaakkolehtinen/status/1258102168176951299).
 
-4. You can resize N-D images.
+5. Resizing supports both Numpy and PyTorch tensors seamlessly, just by the type of input tensor given. Results are checked to be identical in both modes, so you can safely apply to different tensor types and maintain consistency.
 
-5. Some existing packages return misaligned results. it is visually not apparent but can cause great damage to image enhancement tasks.(https://hackernoon.com/how-tensorflows-tf-image-resize-stole-60-days-of-my-life-aba5eb093f35)
+6. For PyTorch you can either use a ResizeLayer (nn.Module) that calculates the resizing weights once on initialization and then applies them at each network pass.
 
-6. You can specify a list of scale-factors to resize each dimension using a different scale-factor.
+7. On the other hand, you can use a dynamic resize function to scale to different scal-factors at each pass. Both ways built upon the same building-blocks and produce identical results.
 
+8. Differently from some existing methods, including MATLAB, You can resize N-D images.
+
+9. You can specify a list of scale-factors to resize each dimension using a different scale-factor.
+
+10. You can easily add and embed you own interpolation methods for the resizer to use (see interp_mehods.py)
 --------
 
 ### Cite / credit
 If you find our work useful in your research or publication, please cite this work:
 ```
-@misc{Resizer,
+@misc{ResizeRight,
   author = {Assaf Shocher},
-  title = {Resizer: Only way to resize},
+  title = {ResizeRight},
   year = {2018},
   publisher = {GitHub},
   journal = {GitHub repository},
-  howpublished = {\url{https://github.com/assafshocher/resizer}},
+  howpublished = {\url{https://github.com/assafshocher/ResizeRight}},
 }
 ```
 
 --------
 
 ### Usage:
+For dynamic resize using either Numpy or PyTorch:
 ```
-resizer.imresize(im, scale_factor=None, output_shape=None, kernel=None, antialiasing=True, kernel_shift_flag=False)
+resize_reight.resize(input, scale_factors=None, out_shape=None, 
+                     interp_method=interp_methods.cubic, win_sz=4, 
+                     antialiasing=True)
+```
+For a PyTorch layer (nn.Module):
+```
+resize_layer = ResizeLayer(self, in_shape, scale_factors=None, out_shape=None,
+                           interp_method=interp_methods.cubic, win_sz=4,
+                           antialiasing=True
+                           
+resize_layer(input)
 ```
 
-__im__ :   
-the input image
+__input__ :   
+the input image/tensor, a Numpy or Torch tensor.
+
+__in_shape__  (only specified for a static layer):   
+the input tensor shape. a list of integers.
 
 __scale_factor__:    
 can be specified as-  
-1. one scalar scale - then it will be assumed that you want to resize first two dims with this scale.  
-2. a list or array of scales - one for each dimension you want to resize. note: if length of the list is L then first L dims will be rescaled.  
+1. one scalar scale - then it will be assumed that you want to resize first two dims with this scale for Numpy or last two for PyTorch.  
+2. a list or array of scales - one for each dimension you want to resize. note: if length of the list is L then first L dims will be rescaled for Numpy and last L for PyTorch.  
 3. not specified - then it will be calculated using output_size. this is not recomended (see advantage 2 in the list above).   
 
-__output_shape__:   
-A list or array with same length as im.shape. if not specified, can be calcualated from scale_factor
+__out_shape__:   
+A list or tupple. if shorter than input.shape then only the first/last (depending np/torch) dims are resized. if not specified, can be calcualated from scale_factor.
 
-__kernel__:   
-Can be one of the following strings: "cubic", "lanczos2", "lanczos3", "box",  "linear" (or other methods you may add). 
-Or a 2D numpy array if the numeric kernel option is wanted.
+__interp_method__:   
+The type of interpolation used to calculate the weights. this is a scalar to scalar function that needs to be applicable to tensors. see examples in interp_methods.py.
+
+__support_sz__:   
+This is the support of the interpolation method, i.e length of non-zero segment. this is a characteristic of the function. eg. for bicubic 4, linear 2, laczos2 4, lanczos3 6, box 1.
 
 __antialiasing__:   
 This is an option similar to MATLAB's default. only relevant for downscaling. if true it basicly means that the kernel is stretched with 1/scale_factor to prevent aliasing (low-pass filtering)
 
-__kernel_shift_flag__:    
-this is an option made to automatically fix misalignment of kernel center of mass, by shifting it so that the resized result is aligned exactly (resizing with any regular method will align it perfectly to input image) (see comment inside the function for further info). the drawback here is that shifting the kenrel uses interpolation which can potentially harm accuracy. however it is sometimes crucial and furthermore this damage is neglegable in any application I tested.
