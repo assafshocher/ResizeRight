@@ -20,7 +20,8 @@ if numpy is None and torch is None:
 
 
 def resize(input, scale_factors=None, out_shape=None,
-           interp_method=interp_methods.cubic, win_sz=4, antialiasing=True):
+           interp_method=interp_methods.cubic, support_sz=4, 
+           antialiasing=True):
     # get properties of the input tensor
     in_shape, n_dims = input.shape, input.ndim
 
@@ -51,7 +52,7 @@ def resize(input, scale_factors=None, out_shape=None,
         # along this dim
         field_of_view, weights = prepare_weights_and_field_of_view_1d(
             dim, scale_factor, in_shape[dim], out_shape[dim], interp_method,
-            win_sz, antialiasing, fw, eps)
+            support_sz, antialiasing, fw, eps)
 
         # multiply the weights by the values in the field of view and
         # aggreagate
@@ -62,7 +63,7 @@ def resize(input, scale_factors=None, out_shape=None,
 
 class ResizeLayer(nn.Module):
     def __init__(self, in_shape, scale_factors=None, out_shape=None,
-                 interp_method=interp_methods.cubic, win_sz=4,
+                 interp_method=interp_methods.cubic, support_sz=4,
                  antialiasing=True):
         super(ResizeLayer, self).__init__()
 
@@ -95,7 +96,7 @@ class ResizeLayer(nn.Module):
             # location along this dim
             field_of_view, weights = prepare_weights_and_field_of_view_1d(
                 dim, scale_factor, in_shape[dim], out_shape[dim],
-                interp_method, win_sz, antialiasing, fw, eps)
+                interp_method, support_sz, antialiasing, fw, eps)
 
             # keep weights and fields of views for all dims
             weights_list.append(nn.Parameter(weights, requires_grad=False))
@@ -122,12 +123,13 @@ class ResizeLayer(nn.Module):
 
 
 def prepare_weights_and_field_of_view_1d(dim, scale_factor, in_sz, out_sz,
-                                         interp_method, win_sz, antialiasing,
-                                         fw, eps):
+                                         interp_method, support_sz, 
+                                         antialiasing, fw, eps):
     # If antialiasing is taking place, we modify the window size and the
     # interpolation method (see inside function)
-    interp_method, cur_win_sz = apply_antialiasing_if_needed(interp_method,
-                                                             win_sz,
+    interp_method, cur_support_sz = apply_antialiasing_if_needed(
+                                                             interp_method,
+                                                             support_sz,
                                                              scale_factor,
                                                              antialiasing)
 
@@ -137,8 +139,8 @@ def prepare_weights_and_field_of_view_1d(dim, scale_factor, in_sz, out_sz,
 
     # STEP 2- FIELDS OF VIEW: for each output pixels, map the input pixels
     # that influence it
-    field_of_view = get_field_of_view(projected_grid, cur_win_sz, in_sz, fw,
-                                      eps)
+    field_of_view = get_field_of_view(projected_grid, cur_support_sz, in_sz,
+                                      fw, eps)
 
     # STEP 3- CALCULATE WEIGHTS: Match a set of weights to the pixels in the
     # field of view for each output pixel
@@ -234,15 +236,15 @@ def get_projected_grid(in_sz, out_sz, scale_factor, fw):
             (in_sz - 1) / 2 - (out_sz - 1) / (2 * scale_factor))
 
 
-def get_field_of_view(projected_grid, cur_win_sz, in_sz, fw, eps):
+def get_field_of_view(projected_grid, cur_support_sz, in_sz, fw, eps):
     # for each output pixel, map which input pixels influence it, in 1d.
     # we start by calculating the leftmost neighbor, using half of the window
     # size (eps is for when boundary is exact int)
-    left_boundaries = fw_ceil(projected_grid - cur_win_sz / 2 - eps, fw)
+    left_boundaries = fw_ceil(projected_grid - cur_support_sz / 2 - eps, fw)
 
     # then we simply take all the pixel centers in the field by counting
     # window size pixels from the left boundary
-    ordinal_numbers = fw.arange(ceil(cur_win_sz - eps))
+    ordinal_numbers = fw.arange(ceil(cur_support_sz - eps))
     field_of_view = left_boundaries[:, None] + ordinal_numbers
 
     # next we do a trick instead of padding, we map the field of view so that
@@ -266,18 +268,18 @@ def get_weights(interp_method, projected_grid, field_of_view):
     return weights / sum_weights
 
 
-def apply_antialiasing_if_needed(interp_method, win_sz, scale_factor,
+def apply_antialiasing_if_needed(interp_method, support_sz, scale_factor,
                                  antialiasing):
     # antialiasing is "stretching" the field of view according to the scale
     # factor (only for downscaling). this is low-pass filtering. this
     # requires modifying both the interpolation (stretching the 1d
     # function and multiplying by the scale-factor) and the window size.
     if scale_factor >= 1.0 or not antialiasing:
-        return interp_method, win_sz
+        return interp_method, support_sz
     cur_interp_method = (lambda arg: scale_factor *
                          interp_method(scale_factor * arg))
-    cur_win_sz = win_sz / scale_factor
-    return cur_interp_method, cur_win_sz
+    cur_support_sz = support_sz / scale_factor
+    return cur_interp_method, cur_support_sz
 
 
 def fw_ceil(x, fw):
