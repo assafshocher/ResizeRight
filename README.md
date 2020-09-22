@@ -21,13 +21,13 @@ This is one of the main reasons for creating this as this consistency is often c
 
 7. On the other hand, you can use a **dynamic resize** function to scale to different scal-factors at each pass. Both ways built upon the same building-blocks and produce identical results. Both are differntiable and can be used inside a neural network.
 
-8. Differently from some existing methods, including MATLAB, You can **resize N-D images.**
+8. Differently from some existing methods, including MATLAB, You can **resize N-D tensors in M-D dimensions.** for any M<N.
 
 9. You can specify a list of scale-factors to resize each dimension using a different scale-factor.
 
 10. You can easily add and embed you own interpolation methods for the resizer to use (see interp_mehods.py)
 
-11. Some calculations are done more efficiently then the MATLAB version (one example is that MATLAB extends the kernel size by 2, and then searches for zero columns in the weights and cancels them. ResizeRight uses an observation that resizing is actually a continuous convolution and avoids having these redundancies ahead, see From Discrete to Shocher et al. Continuous Convolution Layers https://arxiv.org/abs/2006.11120).
+11. Some calculations are done more efficiently then the MATLAB version (one example is that MATLAB extends the kernel size by 2, and then searches for zero columns in the weights and cancels them. ResizeRight uses an observation that resizing is actually a continuous convolution and avoids having these redundancies ahead, see Shocher et al. From Discrete to  Continuous Convolution Layers https://arxiv.org/abs/2006.11120).
 --------
 
 ### Cite / credit
