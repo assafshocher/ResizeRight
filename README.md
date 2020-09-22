@@ -49,13 +49,13 @@ If you find our work useful in your research or publication, please cite this wo
 For dynamic resize using either Numpy or PyTorch:
 ```
 resize_reight.resize(input, scale_factors=None, out_shape=None, 
-                     interp_method=interp_methods.cubic, win_sz=4, 
+                     interp_method=interp_methods.cubic, support_sz=4, 
                      antialiasing=True)
 ```
 For a PyTorch layer (nn.Module):
 ```
 resize_layer = ResizeLayer(self, in_shape, scale_factors=None, out_shape=None,
-                           interp_method=interp_methods.cubic, win_sz=4,
+                           interp_method=interp_methods.cubic, support_sz=4,
                            antialiasing=True
                            
 resize_layer(input)
@@ -71,7 +71,7 @@ __scale_factor__:
 can be specified as-  
 1. one scalar scale - then it will be assumed that you want to resize first two dims with this scale for Numpy or last two for PyTorch.  
 2. a list or array of scales - one for each dimension you want to resize. note: if length of the list is L then first L dims will be rescaled for Numpy and last L for PyTorch.  
-3. not specified - then it will be calculated using output_size. this is not recomended (see advantage 2 in the list above).   
+3. not specified - then it will be calculated using output_size. this is not recomended (see advantage 3 in the list above).   
 
 __out_shape__:   
 A list or tupple. if shorter than input.shape then only the first/last (depending np/torch) dims are resized. if not specified, can be calcualated from scale_factor.
