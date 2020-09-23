@@ -40,9 +40,9 @@ resize_reight.resize(input, scale_factors=None, out_shape=None,
 ```
 For a PyTorch layer (nn.Module):
 ```
-resize_layer = ResizeLayer(in_shape, scale_factors=None, out_shape=None,
-                           interp_method=interp_methods.cubic, support_sz=4,
-                           antialiasing=True
+resize_layer = resize_reight.ResizeLayer(in_shape, scale_factors=None, out_shape=None,
+                                         interp_method=interp_methods.cubic, support_sz=4,
+                                         antialiasing=True
                            
 resize_layer(input)
 ```
@@ -53,7 +53,7 @@ the input image/tensor, a Numpy or Torch tensor.
 __in_shape__  (only specified for a static layer):   
 the input tensor shape. a list of integers.
 
-__scale_factor__:    
+__scale_factors__:    
 can be specified as-  
 1. one scalar scale - then it will be assumed that you want to resize first two dims with this scale for Numpy or last two dims for PyTorch.  
 2. a list or tupple of scales - one for each dimension you want to resize. note: if length of the list is L then first L dims will be rescaled for Numpy and last L for PyTorch. 
