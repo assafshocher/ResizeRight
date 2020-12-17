@@ -2,25 +2,32 @@ import warnings
 from math import ceil
 import interp_methods
 
+
+class NoneClass:
+    pass
+
 try:
     import torch
     from torch import nn
+    nnModuleWrapped = nn.Module
 except ImportError:
     warnings.warn('No PyTorch found, will work only with Numpy')
     torch = None
+    nnModuleWrapped = NoneClass
 
 try:
     import numpy
 except ImportError:
     warnings.warn('No Numpy found, will work only with PyTorch')
     numpy = None
+    
 
 if numpy is None and torch is None:
     raise ImportError("Must have either Numpy or PyTorch but both not found")
 
 
 def resize(input, scale_factors=None, out_shape=None,
-           interp_method=interp_methods.cubic, support_sz=4, 
+           interp_method=interp_methods.cubic, support_sz=None, 
            antialiasing=True):
     # get properties of the input tensor
     in_shape, n_dims = input.shape, input.ndim
@@ -41,6 +48,11 @@ def resize(input, scale_factors=None, out_shape=None,
                                        for dim in sorted(range(n_dims),
                                        key=lambda ind: scale_factors[ind])
                                        if scale_factors[dim] != 1.]
+    
+    # unless support size is specified by the user, it is an attribute
+    # of the interpolation method
+    if support_sz is None:
+        support_sz = interp_method.support_sz
 
     # output begins identical to input and changes with each iteration
     output = input
@@ -61,9 +73,9 @@ def resize(input, scale_factors=None, out_shape=None,
     return output
 
 
-class ResizeLayer(nn.Module):
+class ResizeLayer(nnModuleWrapped):
     def __init__(self, in_shape, scale_factors=None, out_shape=None,
-                 interp_method=interp_methods.cubic, support_sz=4,
+                 interp_method=interp_methods.cubic, support_sz=None,
                  antialiasing=True):
         super(ResizeLayer, self).__init__()
 
@@ -76,7 +88,13 @@ class ResizeLayer(nn.Module):
         # scream if both missing
         scale_factors, out_shape = set_scale_and_out_sz(in_shape, out_shape,
                                                         scale_factors, fw)
-        self.n_dims = len(in_shape)
+        
+        # unless support size is specified by the user, it is an attribute
+        # of the interpolation method
+        if support_sz is None:
+            support_sz = interp_method.support_sz
+        
+        self.n_dims = len(in_shape)       
 
         # sort indices of dimensions according to scale of each dimension.
         # since we are going dim by dim this is efficient
