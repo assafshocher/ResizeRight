@@ -41,18 +41,18 @@ def lanczos2(x):
             ((pi**2 * x**2 / 2) + eps)) * to_dtype(abs(x) < 2))
 
 
-def lanczos3(x, fw):
+def lanczos3(x):
     fw, to_dtype, eps = set_framework_dependencies(x)
     return (((fw.sin(pi * x) * fw.sin(pi * x / 3) + eps) /
             ((pi**2 * x**2 / 3) + eps)) * to_dtype(abs(x) < 3))
 
 
-def linear(x, fw):
+def linear(x):
     fw, to_dtype, eps = set_framework_dependencies(x)
     return ((x + 1) * to_dtype((-1 <= x) & (x < 0)) + (1 - x) *
             to_dtype((0 <= x) & (x <= 1)))
 
 
-def box(x, fw):
+def box(x):
     fw, to_dtype, eps = set_framework_dependencies(x)
     return to_dtype((-1 <= x) & (x < 0)) + to_dtype((0 <= x) & (x <= 1))
