@@ -35,13 +35,13 @@ This is one of the main reasons for creating this repository. this downscale-ups
 For dynamic resize using either Numpy or PyTorch:
 ```
 resize_reight.resize(input, scale_factors=None, out_shape=None, 
-                     interp_method=interp_methods.cubic, support_sz=4, 
+                     interp_method=interp_methods.cubic, support_sz=None, 
                      antialiasing=True)
 ```
 For a PyTorch layer (nn.Module):
 ```
 resize_layer = resize_reight.ResizeLayer(in_shape, scale_factors=None, out_shape=None,
-                                         interp_method=interp_methods.cubic, support_sz=4,
+                                         interp_method=interp_methods.cubic, support_sz=None,
                                          antialiasing=True
                            
 resize_layer(input)
