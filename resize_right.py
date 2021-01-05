@@ -53,6 +53,10 @@ def resize(input, scale_factors=None, out_shape=None,
     # of the interpolation method
     if support_sz is None:
         support_sz = interp_method.support_sz
+        
+    # when using pytorch, we need to know what is the input tensor device
+    if fw is torch:
+        device = input.device
 
     # output begins identical to input and changes with each iteration
     output = input
@@ -64,7 +68,7 @@ def resize(input, scale_factors=None, out_shape=None,
         # along this dim
         field_of_view, weights = prepare_weights_and_field_of_view_1d(
             dim, scale_factor, in_shape[dim], out_shape[dim], interp_method,
-            support_sz, antialiasing, fw, eps)
+            support_sz, antialiasing, fw, eps, device)
 
         # multiply the weights by the values in the field of view and
         # aggreagate
@@ -114,7 +118,7 @@ class ResizeLayer(nnModuleWrapped):
             # location along this dim
             field_of_view, weights = prepare_weights_and_field_of_view_1d(
                 dim, scale_factor, in_shape[dim], out_shape[dim],
-                interp_method, support_sz, antialiasing, fw, eps)
+                interp_method, support_sz, antialiasing, fw, eps, input.device)
 
             # keep weights and fields of views for all dims
             weights_list.append(nn.Parameter(weights, requires_grad=False))
@@ -142,7 +146,7 @@ class ResizeLayer(nnModuleWrapped):
 
 def prepare_weights_and_field_of_view_1d(dim, scale_factor, in_sz, out_sz,
                                          interp_method, support_sz, 
-                                         antialiasing, fw, eps):
+                                         antialiasing, fw, eps, device=None):
     # If antialiasing is taking place, we modify the window size and the
     # interpolation method (see inside function)
     interp_method, cur_support_sz = apply_antialiasing_if_needed(
@@ -153,7 +157,7 @@ def prepare_weights_and_field_of_view_1d(dim, scale_factor, in_sz, out_sz,
 
     # STEP 1- PROJECTED GRID: The non-integer locations of the projection of
     # output pixel locations to the input tensor
-    projected_grid = get_projected_grid(in_sz, out_sz, scale_factor, fw)
+    projected_grid = get_projected_grid(in_sz, out_sz, scale_factor, fw, device)
 
     # STEP 2- FIELDS OF VIEW: for each output pixels, map the input pixels
     # that influence it
@@ -244,8 +248,13 @@ def set_scale_and_out_sz(in_shape, out_shape, scale_factors, fw):
     return scale_factors, out_shape
 
 
-def get_projected_grid(in_sz, out_sz, scale_factor, fw):
+def get_projected_grid(in_sz, out_sz, scale_factor, fw, device=None):
+    # we start by having the ouput coordinates which are just integer locations
     out_coordinates = fw.arange(out_sz)
+    
+    # if using torch we need to match the grid tensor device to the input device
+    out_coordinates = fw_set_device(out_coordinates, device, fw)
+        
     # This is projecting the ouput pixel locations in 1d to the input tensor,
     # as non-integer locations.
     # the following fomrula is derived in the paper
@@ -263,6 +272,8 @@ def get_field_of_view(projected_grid, cur_support_sz, in_sz, fw, eps):
     # then we simply take all the pixel centers in the field by counting
     # window size pixels from the left boundary
     ordinal_numbers = fw.arange(ceil(cur_support_sz - eps))
+    # in case using torch we need to match the device
+    ordinal_numbers = fw_set_device(ordinal_numbers, projected_grid.device, fw)
     field_of_view = left_boundaries[:, None] + ordinal_numbers
 
     # next we do a trick instead of padding, we map the field of view so that
@@ -270,6 +281,7 @@ def get_field_of_view(projected_grid, cur_support_sz, in_sz, fw, eps):
     # (which would require enlarging the input tensor)
     mirror = fw_cat((fw.arange(in_sz), fw.arange(in_sz - 1, -1, step=-1)), fw)
     field_of_view = mirror[fw.remainder(field_of_view, mirror.shape[0])]
+    field_of_view = fw_set_device(field_of_view,projected_grid.device, fw)
     return field_of_view
 
 
@@ -319,3 +331,9 @@ def fw_swapaxes(x, ax_1, ax_2, fw):
         return fw.swapaxes(x, ax_1, ax_2)
     else:
         return x.transpose(ax_1, ax_2)
+    
+def fw_set_device(x, device, fw):
+    if fw is numpy:
+        return x
+    else:
+        return x.to(device)
