@@ -55,6 +55,7 @@ def resize(input, scale_factors=None, out_shape=None,
         support_sz = interp_method.support_sz
         
     # when using pytorch, we need to know what is the input tensor device
+    device = None
     if fw is torch:
         device = input.device
 
@@ -273,7 +274,10 @@ def get_field_of_view(projected_grid, cur_support_sz, in_sz, fw, eps):
     # window size pixels from the left boundary
     ordinal_numbers = fw.arange(ceil(cur_support_sz - eps))
     # in case using torch we need to match the device
-    ordinal_numbers = fw_set_device(ordinal_numbers, projected_grid.device, fw)
+    if fw is torch:
+        ordinal_numbers = fw_set_device(ordinal_numbers, projected_grid.device, fw)
+    else:
+        ordinal_numbers = fw_set_device(ordinal_numbers, projected_grid, fw)
     field_of_view = left_boundaries[:, None] + ordinal_numbers
 
     # next we do a trick instead of padding, we map the field of view so that
@@ -281,7 +285,10 @@ def get_field_of_view(projected_grid, cur_support_sz, in_sz, fw, eps):
     # (which would require enlarging the input tensor)
     mirror = fw_cat((fw.arange(in_sz), fw.arange(in_sz - 1, -1, step=-1)), fw)
     field_of_view = mirror[fw.remainder(field_of_view, mirror.shape[0])]
-    field_of_view = fw_set_device(field_of_view,projected_grid.device, fw)
+    if fw is torch:
+        field_of_view = fw_set_device(field_of_view,projected_grid.device, fw)
+    else:
+        field_of_view = fw_set_device(field_of_view,projected_grid, fw)
     return field_of_view
 
 
