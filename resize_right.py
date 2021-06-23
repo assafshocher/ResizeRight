@@ -55,8 +55,7 @@ def resize(input, scale_factors=None, out_shape=None,
         support_sz = interp_method.support_sz
         
     # when using pytorch, we need to know what is the input tensor device
-    if fw is torch:
-        device = input.device
+    device = input.device if fw is torch else None
 
     # output begins identical to input and changes with each iteration
     output = input
@@ -162,7 +161,7 @@ def prepare_weights_and_field_of_view_1d(dim, scale_factor, in_sz, out_sz,
     # STEP 2- FIELDS OF VIEW: for each output pixels, map the input pixels
     # that influence it
     field_of_view = get_field_of_view(projected_grid, cur_support_sz, in_sz,
-                                      fw, eps)
+                                      fw, eps, device)
 
     # STEP 3- CALCULATE WEIGHTS: Match a set of weights to the pixels in the
     # field of view for each output pixel
@@ -263,7 +262,7 @@ def get_projected_grid(in_sz, out_sz, scale_factor, fw, device=None):
             (in_sz - 1) / 2 - (out_sz - 1) / (2 * scale_factor))
 
 
-def get_field_of_view(projected_grid, cur_support_sz, in_sz, fw, eps):
+def get_field_of_view(projected_grid, cur_support_sz, in_sz, fw, eps, device):
     # for each output pixel, map which input pixels influence it, in 1d.
     # we start by calculating the leftmost neighbor, using half of the window
     # size (eps is for when boundary is exact int)
@@ -273,7 +272,7 @@ def get_field_of_view(projected_grid, cur_support_sz, in_sz, fw, eps):
     # window size pixels from the left boundary
     ordinal_numbers = fw.arange(ceil(cur_support_sz - eps))
     # in case using torch we need to match the device
-    ordinal_numbers = fw_set_device(ordinal_numbers, projected_grid.device, fw)
+    ordinal_numbers = fw_set_device(ordinal_numbers, device, fw)
     field_of_view = left_boundaries[:, None] + ordinal_numbers
 
     # next we do a trick instead of padding, we map the field of view so that
@@ -281,7 +280,7 @@ def get_field_of_view(projected_grid, cur_support_sz, in_sz, fw, eps):
     # (which would require enlarging the input tensor)
     mirror = fw_cat((fw.arange(in_sz), fw.arange(in_sz - 1, -1, step=-1)), fw)
     field_of_view = mirror[fw.remainder(field_of_view, mirror.shape[0])]
-    field_of_view = fw_set_device(field_of_view,projected_grid.device, fw)
+    field_of_view = fw_set_device(field_of_view, device, fw)
     return field_of_view
 
 
