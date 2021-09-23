@@ -79,7 +79,7 @@ def resize(input, scale_factors=None, out_shape=None,
 class ResizeLayer(nnModuleWrapped):
     def __init__(self, in_shape, scale_factors=None, out_shape=None,
                  interp_method=interp_methods.cubic, support_sz=None,
-                 antialiasing=True):
+                 antialiasing=True, device=None):
         super(ResizeLayer, self).__init__()
 
         # fw stands for framework, that can be either numpy or torch. since
@@ -117,7 +117,7 @@ class ResizeLayer(nnModuleWrapped):
             # location along this dim
             field_of_view, weights = prepare_weights_and_field_of_view_1d(
                 dim, scale_factor, in_shape[dim], out_shape[dim],
-                interp_method, support_sz, antialiasing, fw, eps, input.device)
+                interp_method, support_sz, antialiasing, fw, eps, device)
 
             # keep weights and fields of views for all dims
             weights_list.append(nn.Parameter(weights, requires_grad=False))

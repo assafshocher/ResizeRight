@@ -40,9 +40,9 @@ resize_reight.resize(input, scale_factors=None, out_shape=None,
 ```
 For a PyTorch layer (nn.Module):
 ```
-resize_layer = resize_reight.ResizeLayer(in_shape, scale_factors=None, out_shape=None,
-                                         interp_method=interp_methods.cubic, support_sz=None,
-                                         antialiasing=True
+resize_layer = resize_right.ResizeLayer(in_shape, scale_factors=None, out_shape=None,
+                                        interp_method=interp_methods.cubic, support_sz=None,
+                                        antialiasing=True, device=torch.device('cuda'))
                            
 resize_layer(input)
 ```
