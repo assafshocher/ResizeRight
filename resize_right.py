@@ -1,10 +1,12 @@
 import warnings
 from math import ceil
 import interp_methods
+from fractions import Fraction
 
 
 class NoneClass:
     pass
+
 
 try:
     import torch
@@ -20,15 +22,16 @@ try:
 except ImportError:
     warnings.warn('No Numpy found, will work only with PyTorch')
     numpy = None
-    
+
 
 if numpy is None and torch is None:
     raise ImportError("Must have either Numpy or PyTorch but both not found")
 
 
 def resize(input, scale_factors=None, out_shape=None,
-           interp_method=interp_methods.cubic, support_sz=None, 
-           antialiasing=True):
+           interp_method=interp_methods.cubic, support_sz=None,
+           antialiasing=True, by_convs=False, scale_tolerance=None,
+           max_denominator=10, pad_mode='constant'):
     # get properties of the input tensor
     in_shape, n_dims = input.shape, input.ndim
 
@@ -36,151 +39,188 @@ def resize(input, scale_factors=None, out_shape=None,
     # determined by the input type
     fw = numpy if type(input) is numpy.ndarray else torch
     eps = fw.finfo(fw.float32).eps
+    device = input.device if fw is torch else None
 
     # set missing scale factors or output shapem one according to another,
-    # scream if both missing
-    scale_factors, out_shape = set_scale_and_out_sz(in_shape, out_shape,
-                                                    scale_factors, fw)
+    # scream if both missing. this is also where all the defults policies
+    # take place. also handling the by_convs attribute carefully.
+    scale_factors, out_shape, by_convs = set_scale_and_out_sz(in_shape,
+                                                              out_shape,
+                                                              scale_factors,
+                                                              by_convs,
+                                                              scale_tolerance,
+                                                              max_denominator,
+                                                              eps, fw)
 
     # sort indices of dimensions according to scale of each dimension.
     # since we are going dim by dim this is efficient
-    sorted_filtered_dims_and_scales = [(dim, scale_factors[dim])
+    sorted_filtered_dims_and_scales = [(dim, scale_factors[dim], by_convs[dim],
+                                        in_shape[dim], out_shape[dim])
                                        for dim in sorted(range(n_dims),
                                        key=lambda ind: scale_factors[ind])
                                        if scale_factors[dim] != 1.]
-    
+
     # unless support size is specified by the user, it is an attribute
     # of the interpolation method
     if support_sz is None:
         support_sz = interp_method.support_sz
-        
-    # when using pytorch, we need to know what is the input tensor device
-    device = input.device if fw is torch else None
 
     # output begins identical to input and changes with each iteration
     output = input
 
     # iterate over dims
-    for dim, scale_factor in sorted_filtered_dims_and_scales:
+    for (dim, scale_factor, dim_by_convs, in_sz, out_sz
+         ) in sorted_filtered_dims_and_scales:
+        # STEP 1- PROJECTED GRID: The non-integer locations of the projection
+        # of output pixel locations to the input tensor
+        projected_grid = get_projected_grid(in_sz, out_sz,
+                                            scale_factor, fw, dim_by_convs,
+                                            device)
 
-        # get 1d set of weights and fields of view for each output location
-        # along this dim
-        field_of_view, weights = prepare_weights_and_field_of_view_1d(
-            dim, scale_factor, in_shape[dim], out_shape[dim], interp_method,
-            support_sz, antialiasing, fw, eps, device)
+        # STEP 1.5: ANTIALIASING- If antialiasing is taking place, we modify
+        # the window size and the interpolation method (see inside function)
+        cur_interp_method, cur_support_sz = apply_antialiasing_if_needed(
+                                                                interp_method,
+                                                                support_sz,
+                                                                scale_factor,
+                                                                antialiasing)
 
-        # multiply the weights by the values in the field of view and
-        # aggreagate
-        output = apply_weights(output, field_of_view, weights, dim, n_dims,
-                               fw)
+        # STEP 2- FIELDS OF VIEW: for each output pixels, map the input pixels
+        # that influence it. Also calculate needed padding and update grid
+        # accoedingly
+        field_of_view = get_field_of_view(projected_grid, cur_support_sz, fw,
+                                          eps, device)
+
+        # STEP 2.5- CALCULATE PAD AND UPDATE: according to the field of view,
+        # the input should be padded to handle the boundaries, coordinates
+        # should be updated. actual padding only occurs when weights are
+        # aplied (step 4). if using by_convs for this dim, then we need to
+        # calc right and left boundaries for each filter instead.
+        pad_sz, projected_grid, field_of_view = calc_pad_sz(in_sz, out_sz,
+                                                            field_of_view,
+                                                            projected_grid,
+                                                            scale_factor,
+                                                            dim_by_convs, fw,
+                                                            device)
+
+        # STEP 3- CALCULATE WEIGHTS: Match a set of weights to the pixels in
+        # the# field of view for each output pixel
+        weights = get_weights(cur_interp_method, projected_grid, field_of_view)
+
+        # STEP 4- APPLY WEIGHTS: Each output pixel is calculated by multiplying
+        # its set of weights with the pixel values in its field of view.
+        # We now multiply the fields of view with their matching weights.
+        # We do this by tensor multiplication and broadcasting.
+        # if by_convs is true for this dim, then we do this action by
+        # convolutions. this is equivalent but faster.
+        if not dim_by_convs:
+            output = apply_weights(output, field_of_view, weights, dim, n_dims,
+                                   pad_sz, pad_mode, fw)
+        else:
+            output = apply_convs(output, scale_factor, in_sz, out_sz, weights,
+                                 dim, pad_sz, pad_mode, fw)
     return output
 
 
-class ResizeLayer(nnModuleWrapped):
-    def __init__(self, in_shape, scale_factors=None, out_shape=None,
-                 interp_method=interp_methods.cubic, support_sz=None,
-                 antialiasing=True):
-        super(ResizeLayer, self).__init__()
+def get_projected_grid(in_sz, out_sz, scale_factor, fw, by_convs, device=None):
+    # we start by having the ouput coordinates which are just integer locations
+    # in the special case when usin by_convs, we only need two cycles of grid
+    # points. the first and last.
+    grid_sz = out_sz if not by_convs else scale_factor.numerator
+    out_coordinates = fw_arange(grid_sz, fw, device)
 
-        # fw stands for framework, that can be either numpy or torch. since
-        # this is a torch layer, only one option in this case.
-        fw = torch
-        eps = fw.finfo(fw.float32).eps
-
-        # set missing scale factors or output shapem one according to another,
-        # scream if both missing
-        scale_factors, out_shape = set_scale_and_out_sz(in_shape, out_shape,
-                                                        scale_factors, fw)
-        
-        # unless support size is specified by the user, it is an attribute
-        # of the interpolation method
-        if support_sz is None:
-            support_sz = interp_method.support_sz
-        
-        self.n_dims = len(in_shape)       
-
-        # sort indices of dimensions according to scale of each dimension.
-        # since we are going dim by dim this is efficient
-        self.sorted_filtered_dims_and_scales = [(dim, scale_factors[dim])
-                                                for dim in
-                                                sorted(range(self.n_dims),
-                                                key=lambda ind:
-                                                scale_factors[ind])
-                                                if scale_factors[dim] != 1.]
-
-        # iterate over dims
-        field_of_view_list = []
-        weights_list = []
-        for dim, scale_factor in self.sorted_filtered_dims_and_scales:
-
-            # get 1d set of weights and fields of view for each output
-            # location along this dim
-            field_of_view, weights = prepare_weights_and_field_of_view_1d(
-                dim, scale_factor, in_shape[dim], out_shape[dim],
-                interp_method, support_sz, antialiasing, fw, eps, input.device)
-
-            # keep weights and fields of views for all dims
-            weights_list.append(nn.Parameter(weights, requires_grad=False))
-            field_of_view_list.append(nn.Parameter(field_of_view,
-                                      requires_grad=False))
-
-        self.field_of_view = nn.ParameterList(field_of_view_list)
-        self.weights = nn.ParameterList(weights_list)
-        self.in_shape = in_shape
-
-    def forward(self, input):
-        # output begins identical to input and changes with each iteration
-        output = input
-
-        for (dim, scale_factor), field_of_view, weights in zip(
-                self.sorted_filtered_dims_and_scales,
-                self.field_of_view,
-                self.weights):
-            # multiply the weights by the values in the field of view and
-            # aggreagate
-            output = apply_weights(output, field_of_view, weights, dim,
-                                   self.n_dims, torch)
-        return output
+    # This is projecting the ouput pixel locations in 1d to the input tensor,
+    # as non-integer locations.
+    # the following fomrula is derived in the paper
+    # "From Discrete to Continuous Convolutions" by Shocher et al.
+    return (out_coordinates / float(scale_factor) +
+            (in_sz - 1) / 2 - (out_sz - 1) / (2 * float(scale_factor)))
 
 
-def prepare_weights_and_field_of_view_1d(dim, scale_factor, in_sz, out_sz,
-                                         interp_method, support_sz, 
-                                         antialiasing, fw, eps, device=None):
-    # If antialiasing is taking place, we modify the window size and the
-    # interpolation method (see inside function)
-    interp_method, cur_support_sz = apply_antialiasing_if_needed(
-                                                             interp_method,
-                                                             support_sz,
-                                                             scale_factor,
-                                                             antialiasing)
+def get_field_of_view(projected_grid, cur_support_sz, fw, eps, device):
+    # for each output pixel, map which input pixels influence it, in 1d.
+    # we start by calculating the leftmost neighbor, using half of the window
+    # size (eps is for when boundary is exact int)
+    left_boundaries = fw_ceil(projected_grid - cur_support_sz / 2 - eps, fw)
 
-    # STEP 1- PROJECTED GRID: The non-integer locations of the projection of
-    # output pixel locations to the input tensor
-    projected_grid = get_projected_grid(in_sz, out_sz, scale_factor, fw, device)
-
-    # STEP 2- FIELDS OF VIEW: for each output pixels, map the input pixels
-    # that influence it
-    field_of_view = get_field_of_view(projected_grid, cur_support_sz, in_sz,
-                                      fw, eps, device)
-
-    # STEP 3- CALCULATE WEIGHTS: Match a set of weights to the pixels in the
-    # field of view for each output pixel
-    weights = get_weights(interp_method, projected_grid, field_of_view)
-
-    return field_of_view, weights
+    # then we simply take all the pixel centers in the field by counting
+    # window size pixels from the left boundary
+    ordinal_numbers = fw_arange(ceil(cur_support_sz - eps), fw, device)
+    return left_boundaries[:, None] + ordinal_numbers
 
 
-def apply_weights(input, field_of_view, weights, dim, n_dims, fw):
-    # STEP 4- APPLY WEIGHTS: Each output pixel is calculated by multiplying
-    # its set of weights with the pixel values in its field of view.
-    # We now multiply the fields of view with their matching weights.
-    # We do this by tensor multiplication and broadcasting.
-    # this step is separated to a different function, so that it can be
-    # repeated with the same calculated weights and fields.
+def calc_pad_sz(in_sz, out_sz, field_of_view, projected_grid, scale_factor,
+                dim_by_convs, fw, device):
+    if not dim_by_convs:
+        # determine padding according to neighbor coords out of bound.
+        # this is a generalized notion of padding, when pad<0 it means crop
+        pad_sz = [-field_of_view[0, 0].item(),
+                  field_of_view[-1, -1].item() - in_sz + 1]
 
-    # for this operations we assume the resized dim is the first one.
+        # since input image will be changed by padding, coordinates of both
+        # field_of_view and projected_grid need to be updated
+        field_of_view += pad_sz[0]
+        projected_grid += pad_sz[0]
+
+    else:
+        # only used for by_convs, to calc the boundaries of each filter the
+        # number of distinct convolutions is the numerator of the scale factor
+        num_convs, stride = scale_factor.numerator, scale_factor.denominator
+
+        # calculate left and right boundaries for each conv. left can also be
+        # negative right can be bigger than in_sz. such cases imply padding if
+        # needed. however if# both are in-bounds, it means we need to crop,
+        # pracitacally apply the conv only on part of the image.
+        left_pads = -field_of_view[:, 0]
+
+        # next calc is tricky, explanation by rows:
+        # 1) counting output pixels between the first position of each filter
+        #    to the right boundary of the input
+        # 2) dividing it by number of filters to count how many 'jumps'
+        #    each filter does
+        # 3) multiplying by the stride gives us the distance over the input
+        #    coords done by all these jumps for each filter
+        # 4) to this distance we add the right boundary of the filter when
+        #    placed in its leftmost position. so now we get the right boundary
+        #    of that filter in input coord.
+        # 5) the padding size needed is obtained by subtracting the rightmost
+        #    input coordinate. if the result is positive padding is needed. if
+        #    negative then negative padding means shaving off pixel columns.
+        right_pads = (((out_sz - fw_arange(num_convs, fw, device) - 1)  # (1)
+                      // num_convs)  # (2)
+                      * stride  # (3)
+                      + field_of_view[:, -1]  # (4)
+                      - in_sz + 1)  # (5)
+
+        # in the by_convs case pad_sz is a list of left-right pairs. one per
+        # each filter
+        pad_sz = [(left_pad, right_pad) for (left_pad, right_pad) in
+                  zip(left_pads, right_pads)]
+
+    return pad_sz, projected_grid, field_of_view
+
+
+def get_weights(interp_method, projected_grid, field_of_view):
+    # the set of weights per each output pixels is the result of the chosen
+    # interpolation method applied to the distances between projected grid
+    # locations and the pixel-centers in the field of view (distances are
+    # directed, can be positive or negative)
+    weights = interp_method(projected_grid[:, None] - field_of_view)
+
+    # we now carefully normalize the weights to sum to 1 per each output pixel
+    sum_weights = weights.sum(1, keepdims=True)
+    sum_weights[sum_weights == 0] = 1
+    return weights / sum_weights
+
+
+def apply_weights(input, field_of_view, weights, dim, n_dims, pad_sz, pad_mode,
+                  fw):
+    # for this operation we assume the resized dim is the first one.
     # so we transpose and will transpose back after multiplying
     tmp_input = fw_swapaxes(input, dim, 0, fw)
+
+    # apply padding
+    tmp_input = fw_pad(tmp_input, fw, pad_sz, pad_mode)
 
     # field_of_view is a tensor of order 2: for each output (1d location
     # along cur dim)- a list of 1d neighbors locations.
@@ -194,7 +234,7 @@ def apply_weights(input, field_of_view, weights, dim, n_dims, fw):
     neighbors = tmp_input[field_of_view]
 
     # weights is an order 2 tensor: for each output location along 1d- a list
-    # of weighs matching the field of view. we augment it with ones, for
+    # of weights matching the field of view. we augment it with ones, for
     # broadcasting, so that when multiplies some tensor the weights affect
     # only its first dim.
     tmp_weights = fw.reshape(weights, (*weights.shape, * [1] * (n_dims - 1)))
@@ -207,7 +247,37 @@ def apply_weights(input, field_of_view, weights, dim, n_dims, fw):
     return fw_swapaxes(tmp_output, 0, dim, fw)
 
 
-def set_scale_and_out_sz(in_shape, out_shape, scale_factors, fw):
+def apply_convs(input, scale_factor, in_sz, out_sz, weights, dim, pad_sz,
+                pad_mode, fw):
+    # for this operations we assume the resized dim is the last one.
+    # so we transpose and will transpose back after multiplying
+    input = fw_swapaxes(input, dim, -1, fw)
+
+    # the stride for all convs is the denominator of the scale factor
+    stride, num_convs = scale_factor.denominator, scale_factor.numerator
+
+    # prepare an empty tensor for the output
+    tmp_out_shape = list(input.shape)
+    tmp_out_shape[-1] = out_sz
+    tmp_output = fw_empty((*tmp_out_shape,), fw, input.device)
+
+    # iterate over the conv operations. we have as many as the numerator
+    # of the scale-factor. for each we need boundaries and a filter.
+    for conv_ind, (pad_sz, filt) in enumerate(zip(pad_sz, weights)):
+        # apply padding (we pad last dim, padding can be negative)
+        pad_dim = input.ndim - 1
+        tmp_input = fw_pad(input, fw, pad_sz, pad_mode, dim=pad_dim)
+
+        # apply convolution over last dim. store in the output tensor with
+        # positional strides so that when the loop is comlete conv results are
+        # interwind
+        tmp_output[..., conv_ind::num_convs] = fw_conv(tmp_input, filt, stride)
+
+    return fw_swapaxes(tmp_output, -1, dim, fw)
+
+
+def set_scale_and_out_sz(in_shape, out_shape, scale_factors, by_convs,
+                         scale_tolerance, max_denominator, eps, fw):
     # eventually we must have both scale-factors and out-sizes for all in/out
     # dims. however, we support many possible partial arguments
     if scale_factors is None and out_shape is None:
@@ -242,59 +312,30 @@ def set_scale_and_out_sz(in_shape, out_shape, scale_factors, fw):
             out_shape = [ceil(scale_factor * in_sz)
                          for scale_factor, in_sz in
                          zip(scale_factors, in_shape)]
-        # next line intentionally after out_shape determined for stability
-        scale_factors = [float(sf) for sf in scale_factors]
-    return scale_factors, out_shape
+        # next part intentionally after out_shape determined for stability
+        # we fix by_convs to be a list of truth values in case it is not
+        if not isinstance(by_convs, (list, tuple)):
+            by_convs = [by_convs for _ in range(len(out_shape))]
 
+        # next loop fixes the scale for each dim to be either frac or float.
+        # this is determined by by_convs and by tolerance for scale accuracy.
+        for ind, (sf, dim_by_convs) in enumerate(zip(scale_factors, by_convs)):
+            # first we fractionaize
+            if dim_by_convs:
+                frac = Fraction(sf).limit_denominator(max_denominator)
 
-def get_projected_grid(in_sz, out_sz, scale_factor, fw, device=None):
-    # we start by having the ouput coordinates which are just integer locations
-    out_coordinates = fw.arange(out_sz)
-    
-    # if using torch we need to match the grid tensor device to the input device
-    out_coordinates = fw_set_device(out_coordinates, device, fw)
-        
-    # This is projecting the ouput pixel locations in 1d to the input tensor,
-    # as non-integer locations.
-    # the following fomrula is derived in the paper
-    # "From Discrete to Continuous Convolutions" by Shocher et al.
-    return (out_coordinates / scale_factor +
-            (in_sz - 1) / 2 - (out_sz - 1) / (2 * scale_factor))
+            # if accuracy is within tolerance scale will be frac. if not, then
+            # it will be float and the by_convs attr will be set false for
+            # this dim
+            if scale_tolerance is None:
+                scale_tolerance = eps
+            if dim_by_convs and abs(frac - sf) < scale_tolerance:
+                scale_factors[ind] = frac
+            else:
+                scale_factors[ind] = float(sf)
+                by_convs[ind] = False
 
-
-def get_field_of_view(projected_grid, cur_support_sz, in_sz, fw, eps, device):
-    # for each output pixel, map which input pixels influence it, in 1d.
-    # we start by calculating the leftmost neighbor, using half of the window
-    # size (eps is for when boundary is exact int)
-    left_boundaries = fw_ceil(projected_grid - cur_support_sz / 2 - eps, fw)
-
-    # then we simply take all the pixel centers in the field by counting
-    # window size pixels from the left boundary
-    ordinal_numbers = fw.arange(ceil(cur_support_sz - eps))
-    # in case using torch we need to match the device
-    ordinal_numbers = fw_set_device(ordinal_numbers, device, fw)
-    field_of_view = left_boundaries[:, None] + ordinal_numbers
-
-    # next we do a trick instead of padding, we map the field of view so that
-    # it would be like mirror padding, without actually padding
-    # (which would require enlarging the input tensor)
-    mirror = fw_cat((fw.arange(in_sz), fw.arange(in_sz - 1, -1, step=-1)), fw)
-    field_of_view = mirror[fw.remainder(field_of_view, mirror.shape[0])]
-    field_of_view = fw_set_device(field_of_view, device, fw)
-    return field_of_view
-
-
-def get_weights(interp_method, projected_grid, field_of_view):
-    # the set of weights per each output pixels is the result of the chosen
-    # interpolation method applied to the distances between projected grid
-    # locations and the pixel-centers in the field of view (distances are
-    # directed, can be positive or negative)
-    weights = interp_method(projected_grid[:, None] - field_of_view)
-
-    # we now carefully normalize the weights to sum to 1 per each output pixel
-    sum_weights = weights.sum(1, keepdims=True)
-    sum_weights[sum_weights == 0] = 1
-    return weights / sum_weights
+        return scale_factors, out_shape, by_convs
 
 
 def apply_antialiasing_if_needed(interp_method, support_sz, scale_factor,
@@ -303,6 +344,7 @@ def apply_antialiasing_if_needed(interp_method, support_sz, scale_factor,
     # factor (only for downscaling). this is low-pass filtering. this
     # requires modifying both the interpolation (stretching the 1d
     # function and multiplying by the scale-factor) and the window size.
+    scale_factor = float(scale_factor)
     if scale_factor >= 1.0 or not antialiasing:
         return interp_method, support_sz
     cur_interp_method = (lambda arg: scale_factor *
@@ -318,6 +360,13 @@ def fw_ceil(x, fw):
         return x.ceil().long()
 
 
+def fw_floor(x, fw):
+    if fw is numpy:
+        return fw.int_(fw.floor(x))
+    else:
+        return x.floor().long()
+
+
 def fw_cat(x, fw):
     if fw is numpy:
         return fw.concatenate(x)
@@ -330,9 +379,47 @@ def fw_swapaxes(x, ax_1, ax_2, fw):
         return fw.swapaxes(x, ax_1, ax_2)
     else:
         return x.transpose(ax_1, ax_2)
-    
-def fw_set_device(x, device, fw):
-    if fw is numpy:
+
+
+def fw_pad(x, fw, pad_sz, pad_mode, dim=0):
+    if pad_sz == (0, 0):
         return x
+    if fw is numpy:
+        pad_vec = [(0, 0) for _ in range(x.ndim)]
+        pad_vec[dim] = pad_sz
+        return fw.pad(x, pad_width=pad_vec, mode=pad_mode)
     else:
-        return x.to(device)
+        if x.ndim < 3:
+            x = x[None, None, ...]
+        pad_vec = [0 for _ in range((x.ndim - 2) * 2)]
+        pad_vec[0:2] = pad_sz
+        return fw.nn.functional.pad(x.transpose(dim, -1), pad=pad_vec,
+                                    mode=pad_mode).transpose(dim, -1)
+
+
+def fw_conv(input, filter, stride):
+    # we want to apply 1d conv to any nd array. the way to do it is to reshape
+    # the input to a 4D tensor. first two dims are singeletons, 3rd dim stores
+    # all the spatial dims that we are not convolving along now. then we can
+    # apply conv2d with a 1xK filter. This convolves the same way all the other
+    # dims stored in the 3d dim. like depthwise conv over these.
+    # TODO: numpy support
+    reshaped_input = input.reshape(1, 1, -1, input.shape[-1])
+    reshaped_output = torch.nn.functional.conv2d(reshaped_input,
+                                                 filter.view(1, 1, 1, -1),
+                                                 stride=(1, stride))
+    return reshaped_output.reshape(*input.shape[:-1], -1)
+
+
+def fw_arange(upper_bound, fw, device):
+    if fw is numpy:
+        return fw.arange(upper_bound)
+    else:
+        return fw.arange(upper_bound, device=device)
+
+
+def fw_empty(shape, fw, device):
+    if fw is numpy:
+        return fw.empty(shape)
+    else:
+        return fw.empty(size=(*shape,), device=device)
