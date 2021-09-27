@@ -25,6 +25,8 @@ This is one of the main reasons for creating this repository. this downscale-ups
 9. You can easily add and embed your own interpolation methods for the resizer to use (see interp_mehods.py)
 
 10. All used framework padding methods are supported (depends on numpy/PyTorch mode)
+PyTorch: 'constant', 'reflect', 'replicate', 'circular'.
+Numpy: ‘constant’, ‘edge’, ‘linear_ramp’, ‘maximum’, ‘mean’, ‘median’, ‘minimum’, ‘reflect’, ‘symmetric’, ‘wrap’, ‘empty’
 
 11. Some general calculations are done more efficiently than the MATLAB version (one example is that MATLAB extends the kernel size by 2, and then searches for zero columns in the weights and cancels them. ResizeRight uses an observation that resizing is actually a continuous convolution and avoids having these redundancies ahead, see Shocher et al. ["From Discrete to  Continuous Convolution Layers"](https://arxiv.org/abs/2006.11120)).
 --------
@@ -67,6 +69,11 @@ This is the allowed distance between the M/N closest frac to the float scale_fac
 
 __max_denominator__:
 When by_convs is on, the scale_factor is translated to a rational frac M/N. Where M is limited by this parameter. The goal is to make the calculation more efficient. The number of convolutions used is the size of the denominator.
+
+__pad_mode__:
+This can be used according to the padding methods of each framework.
+PyTorch: 'constant', 'reflect', 'replicate', 'circular'.
+Numpy: ‘constant’, ‘edge’, ‘linear_ramp’, ‘maximum’, ‘mean’, ‘median’, ‘minimum’, ‘reflect’, ‘symmetric’, ‘wrap’, ‘empty’
 
 --------
 
