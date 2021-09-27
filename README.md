@@ -16,7 +16,7 @@ This is one of the main reasons for creating this repository. this downscale-ups
 
 5. Resizing supports **both Numpy and PyTorch** tensors seamlessly, just by the type of input tensor given. Results are checked to be identical in both modes, so you can safely apply to different tensor types and maintain consistency. No Numpy <-> Torch conversion takes part at any step. The process is done exclusively with one of the frameworks. No direct dependency is needed, so you can run it without having PyTorch installed at all, or without Numpy. You only need one of them.
 
-6. In the case where scale_factor * in_size is a rational number with denominater not too big (this is a prameter), calculation is done efficiently based on convolutions (currently only PyTorch is supported). This is extremely more efficient for big tensors and suitable for working on large batches or high resolution.
+6. In the case where scale_factor * in_size is a rational number with denominater not too big (this is a prameter), calculation is done efficiently based on convolutions (currently only PyTorch is supported). This is extremely more efficient for big tensors and suitable for working on large batches or high resolution. Note that this efficient calculation can be applied to certain dims that maintain the conditions while performing the regular calculation for the other dims.
 
 7. Differently from some existing methods, including MATLAB, You can **resize N-D tensors in M-D dimensions.** for any M<=N.
 
