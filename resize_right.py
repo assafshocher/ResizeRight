@@ -32,7 +32,7 @@ if numpy is None and torch is None:
 def resize(input, scale_factors=None, out_shape=None,
            interp_method=interp_methods.cubic, support_sz=None,
            antialiasing=True, by_convs=False, scale_tolerance=None,
-           max_denominator=10, pad_mode='constant'):
+           max_numerator=10, pad_mode='constant'):
     # get properties of the input tensor
     in_shape, n_dims = input.shape, input.ndim
 
@@ -50,7 +50,7 @@ def resize(input, scale_factors=None, out_shape=None,
                                                               scale_factors,
                                                               by_convs,
                                                               scale_tolerance,
-                                                              max_denominator,
+                                                              max_numerator,
                                                               eps, fw)
 
     # sort indices of dimensions according to scale of each dimension.
@@ -281,7 +281,7 @@ def apply_convs(input, scale_factor, in_sz, out_sz, weights, dim, pad_sz,
 
 
 def set_scale_and_out_sz(in_shape, out_shape, scale_factors, by_convs,
-                         scale_tolerance, max_denominator, eps, fw):
+                         scale_tolerance, max_numerator, eps, fw):
     # eventually we must have both scale-factors and out-sizes for all in/out
     # dims. however, we support many possible partial arguments
     if scale_factors is None and out_shape is None:
@@ -327,7 +327,7 @@ def set_scale_and_out_sz(in_shape, out_shape, scale_factors, by_convs,
         for ind, (sf, dim_by_convs) in enumerate(zip(scale_factors, by_convs)):
             # first we fractionaize
             if dim_by_convs:
-                frac = Fraction(1/sf).limit_denominator(max_denominator)
+                frac = Fraction(1/sf).limit_denominator(max_numerator)
                 frac = Fraction(numerator=frac.denominator, denominator=frac.numerator)
 
             # if accuracy is within tolerance scale will be frac. if not, then
