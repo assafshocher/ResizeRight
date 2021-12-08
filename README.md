@@ -37,7 +37,7 @@ For dynamic resize using either Numpy or PyTorch:
 resize_right.resize(input, scale_factors=None, out_shape=None,
                     interp_method=interp_methods.cubic, support_sz=None,
                     antialiasing=True, by_convs=False, scale_tolerance=None,
-                    max_denominator=10, pad_mode='constant'):
+                    max_numerator=10, pad_mode='constant'):
 ```
 
 __input__ :   
@@ -62,13 +62,13 @@ __antialiasing__:
 This is an option similar to MATLAB's default. only relevant for downscaling. if true it basicly means that the kernel is stretched with 1/scale_factor to prevent aliasing (low-pass filtering)
 
 __by_convs__:
-This determines whether to allow efficient calculation using convolutions according to tolerance. This feature should be used when scale_factor * in_size is rational with a denominator low enough (or close enough to being an integer) and the tensors are big (batches or high-resolution).
+This determines whether to allow efficient calculation using convolutions according to tolerance. This feature should be used when scale_factor is rational with a numerator low enough (or close enough to being an integer) and the tensors are big (batches or high-resolution).
 
 __scale_tolerance__:
 This is the allowed distance between the M/N closest frac to the float scale_factore provided. if the frac is closer than this distance, then it will be used and efficient convolution calculation will take place.
 
-__max_denominator__:
-When by_convs is on, the scale_factor is translated to a rational frac M/N. Where M is limited by this parameter. The goal is to make the calculation more efficient. The number of convolutions used is the size of the denominator.
+__max_numerator__:
+When by_convs is on, the scale_factor is translated to a rational frac M/N. Where M is limited by this parameter. The goal is to make the calculation more efficient. The number of convolutions used is the size of the numerator.
 
 __pad_mode__:
 This can be used according to the padding methods of each framework.
