@@ -62,7 +62,7 @@ __antialiasing__:
 This is an option similar to MATLAB's default. only relevant for downscaling. if true it basicly means that the kernel is stretched with 1/scale_factor to prevent aliasing (low-pass filtering)
 
 __by_convs__:
-This determines whether to allow efficient calculation using convolutions according to tolerance. This feature should be used when scale_factor(out_size / in_size) is rational with a numerator low enough (or close enough to being an integer) and the tensors are big (batches or high-resolution).
+This determines whether to allow efficient calculation using convolutions according to tolerance. This feature should be used when scale_factor is rational with a numerator low enough (or close enough to being an integer) and the tensors are big (batches or high-resolution).
 
 __scale_tolerance__:
 This is the allowed distance between the M/N closest frac to the float scale_factore provided. if the frac is closer than this distance, then it will be used and efficient convolution calculation will take place.

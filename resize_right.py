@@ -196,8 +196,6 @@ def calc_pad_sz(in_sz, out_sz, field_of_view, projected_grid, scale_factor,
         # in the by_convs case pad_sz is a list of left-right pairs. one per
         # each filter
 
-        # pad_sz = [(left_pad, right_pad) for (left_pad, right_pad) in
-        #           zip(left_pads, right_pads)]
         pad_sz = list(zip(left_pads, right_pads))
 
     return pad_sz, projected_grid, field_of_view
@@ -262,7 +260,6 @@ def apply_convs(input, scale_factor, in_sz, out_sz, weights, dim, pad_sz,
     # prepare an empty tensor for the output
     tmp_out_shape = list(input.shape)
     tmp_out_shape[-1] = out_sz
-    #tmp_output = fw_empty((*tmp_out_shape,), fw, input.device)
     tmp_output = fw_empty(tuple(tmp_out_shape), fw, input.device)
 
     # iterate over the conv operations. we have as many as the numerator
@@ -319,7 +316,6 @@ def set_scale_and_out_sz(in_shape, out_shape, scale_factors, by_convs,
         # next part intentionally after out_shape determined for stability
         # we fix by_convs to be a list of truth values in case it is not
         if not isinstance(by_convs, (list, tuple)):
-            #by_convs = [by_convs for _ in range(len(out_shape))]
             by_convs = [by_convs] * len(out_shape)
 
         # next loop fixes the scale for each dim to be either frac or float.
@@ -391,7 +387,6 @@ def fw_pad(x, fw, pad_sz, pad_mode, dim=0):
     if pad_sz == (0, 0):
         return x
     if fw is numpy:
-        #pad_vec = [(0, 0) for _ in range(x.ndim)]
         pad_vec = [(0, 0)] * x.ndim
         pad_vec[dim] = pad_sz
         return fw.pad(x, pad_width=pad_vec, mode=pad_mode)
@@ -399,17 +394,6 @@ def fw_pad(x, fw, pad_sz, pad_mode, dim=0):
         if x.ndim < 3:
             x = x[None, None, ...]
 
-        # >>> timeit("list(0 for i in range(0, 100000))", number=1000)
-        # 4.084772332999989
-        # >>> timeit("[0 for i in range(0, 100000)]", number=1000)
-        # 2.9616422500000112
-        # >>> timeit("[0] * 100000", number=1000)
-        # 0.2548029160000169
-        # >>> timeit('list(itertools.repeat(0, 100000))', 'import itertools', number=1000)
-        # 0.5355214580000052
-
-        #pad_vec = [0 for _ in range((x.ndim - 2) * 2)]
-        # we use fastest method to generate list of zeros
         pad_vec = [0] * ((x.ndim - 2) * 2)
         pad_vec[0:2] = pad_sz
         return fw.nn.functional.pad(x.transpose(dim, -1), pad=pad_vec,
